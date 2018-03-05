@@ -176,6 +176,206 @@ class BasicAttn(object):
             return attn_dist, output
 
 
+
+class bidirectionalAttn(object):
+
+    def __init__(self, keep_prob, key_vec_size, value_vec_size):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          key_vec_size: size of the key vectors. int
+          value_vec_size: size of the value vectors. int
+        """
+        self.keep_prob = keep_prob
+        self.key_vec_size = key_vec_size
+        self.value_vec_size = value_vec_size
+
+    def build_graph(self, values, values_mask, keys, keys_mask):
+        """
+        Keys attend to values.
+        For each key, return an attention distribution and an attention output vector.
+
+        Inputs:
+          values: Tensor shape (batch_size, num_values, value_vec_size).
+          values_mask: Tensor shape (batch_size, num_values).
+            1s where there's real input, 0s where there's padding
+          keys: Tensor shape (batch_size, num_keys, value_vec_size)
+
+        Outputs:
+          attn_dist: Tensor shape (batch_size, num_keys, num_values).
+            For each key, the distribution should sum to 1,
+            and should be 0 in the value locations that correspond to padding.
+          output: Tensor shape (batch_size, num_keys, hidden_size).
+            This is the attention output; the weighted sum of the values
+            (using the attention distribution as weights).
+        """
+        with vs.variable_scope("bidirectionalAttn"):
+
+            Wvals = tf.get_variable(name="simVals", shape=(self.key_vec_size),
+                dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+            Wkeys = tf.get_variable(name="simKeys", shape=(self.key_vec_size),
+                dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+            Wovrlp = tf.get_variable(name="simOvrlp", shape=(self.key_vec_size),
+                dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+
+            num_values = tf.shape(values)[1]
+            num_keys   = tf.shape(keys)[1]
+
+            simKeys   = tf.reduce_sum(tf.multiply(keys, Wkeys), axis=2) #(batch_size, num_keys)
+            simVals   = tf.reduce_sum(tf.multiply(values, Wvals), axis=2) #(batch_size, num_values)
+
+            simOvrlp  = tf.reduce_sum(tf.multiply( tf.multiply(
+                                          tf.tile(tf.expand_dims(keys, 2), tf.stack([1,1,num_values,1])),
+                                          tf.tile(tf.expand_dims(values, 1), tf.stack([1,num_keys,1,1]))), Wovrlp), axis=3) #(batch_size, num_keys, num_values)
+            #matL = []
+            #for ir in range(num_keys):
+            #  rowL = []
+            #  for ic in range(num_values):
+            #    rowL.append(tf.matmul(tf.multiply(keys[:,ir,:],values[:,ic,:]),Wovrlp))
+            #  matL.append(tf.stack(rowL, axis=2))
+            #simOvrlp = tf.stack(matL, axis=1)
+
+
+            S         = tf.tile(tf.expand_dims(simKeys, 2), tf.stack([1,1,num_values])) +\
+                        tf.tile(tf.expand_dims(simVals, 1), tf.stack([1,num_keys,1])) + simOvrlp #(batch_size, num_keys, num_values, 3*vec_size)
+            print("s",S.shape.as_list())
+            
+            mask = tf.expand_dims(values_mask, 1)
+            print("mask",mask.shape.as_list())
+            _, alpha = masked_softmax(S, mask, 2)
+            print("alpha",alpha.shape.as_list())
+            a = tf.multiply(tf.expand_dims(alpha, 3), tf.expand_dims(values, 1))
+            print("a",a.shape.as_list())
+            a = tf.reduce_sum(a, 2)
+            print("a",a.shape.as_list())
+
+            m = tf.reduce_max(S, axis=2)
+            print("m",m.shape.as_list())
+            _, beta = masked_softmax(m, keys_mask, 1)
+            print("b",beta.shape.as_list())
+            beta = tf.expand_dims(beta, 2)
+            c = tf.multiply(beta, keys)
+            print("c",c.shape.as_list())
+            c = tf.reduce_sum(c, axis=1)
+            print("c",c.shape.as_list())
+
+            cTile = tf.tile(tf.expand_dims(c, 1), [1,num_keys,1])
+            output = tf.concat([keys, a, cTile], axis=2)
+            print("output",output.shape.as_list())
+
+            # Apply dropout
+            output = tf.nn.dropout(output, self.keep_prob)
+
+            return output
+
+
+
+class coattention(object):
+
+    def __init__(self, keep_prob, batch_size, key_vec_size, value_vec_size):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          key_vec_size: size of the key vectors. int
+          value_vec_size: size of the value vectors. int
+        """
+        self.keep_prob = keep_prob
+        self.batch_size = batch_size
+        self.key_vec_size = key_vec_size
+        self.value_vec_size = value_vec_size
+
+    def build_graph(self, values, values_mask, keys, keys_mask):
+        """
+        Keys attend to values.
+        For each key, return an attention distribution and an attention output vector.
+
+        Inputs:
+          values: Tensor shape (batch_size, num_values, value_vec_size).
+          values_mask: Tensor shape (batch_size, num_values).
+            1s where there's real input, 0s where there's padding
+          keys: Tensor shape (batch_size, num_keys, value_vec_size)
+
+        Outputs:
+          attn_dist: Tensor shape (batch_size, num_keys, num_values).
+            For each key, the distribution should sum to 1,
+            and should be 0 in the value locations that correspond to padding.
+          output: Tensor shape (batch_size, num_keys, hidden_size).
+            This is the attention output; the weighted sum of the values
+            (using the attention distribution as weights).
+        """
+        with vs.variable_scope("coattention"):
+
+            vS = tf.get_variable(name="valSentinel", shape=(1,1,self.value_vec_size),
+                dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+            kS = tf.get_variable(name="keySentinel", shape=(1,1,self.key_vec_size),
+                dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
+            mask = tf.ones(name="addMask", shape=(1,1), dtype=tf.int32)
+
+
+            num_values = tf.shape(values)[1]
+            num_keys   = tf.shape(keys)[1]
+
+            print("val",values.shape.as_list())
+            print("key",keys.shape.as_list())
+            valTanh   = tf.contrib.layers.fully_connected(values, self.value_vec_size, activation_fn=tf.nn.tanh) 
+            valSent   = tf.concat([valTanh,tf.tile(vS, [self.batch_size,1,1])], axis=1)
+            keySent   = tf.concat([keys,tf.tile(kS, [self.batch_size,1,1])], axis=1)
+            print("val",valSent.shape.as_list())
+            print("key",keySent.shape.as_list())
+
+            L  = tf.reduce_sum(tf.multiply(
+                             tf.tile(tf.expand_dims(keySent, 2), tf.stack([1,1,num_values,1])),
+                             tf.tile(tf.expand_dims(valSent, 1), tf.stack([1,num_keys,1,1]))), axis=3) #(batch_size, num_keys, num_values)
+           
+            print("L",L.shape.as_list())
+            print("vmask",values_mask.shape.as_list())
+            print("kmask",keys_mask.shape.as_list())
+            valMask = tf.concat([values_mask,tf.tile(mask,[self.batch_size,1])], axis=1)
+            keyMask = tf.concat([keys_mask,tf.tile(mask,[self.batch_size,1])], axis=1)
+            print("vmask",valMask.shape.as_list())
+            print("kmask",keyMask.shape.as_list())
+
+            _, alpha = masked_softmax(L, tf.expand_dims(valMask, 1), 2)
+            print("alpha",alpha.shape.as_list())
+            a = tf.multiply(tf.expand_dims(alpha, 3), tf.expand_dims(valSent, 1))
+            print("a",a.shape.as_list())
+            a = tf.reduce_sum(a, 2)
+            print("a",a.shape.as_list())
+
+            _, beta = masked_softmax(L, tf.expand_dims(keyMask, 2), 1)
+            print("beta",beta.shape.as_list())
+            #beta = tf.expand_dims(beta, 2)
+            b = tf.multiply(tf.expand_dims(beta, 3), tf.expand_dims(keySent, 2))
+            print("b",b.shape.as_list())
+            b = tf.reduce_sum(b, axis=1)
+            print("b",b.shape.as_list())
+
+            s = tf.multiply(tf.expand_dims(b, 1), tf.expand_dims(keySent, 2))
+            print("s",s.shape.as_list())
+            s = tf.reduce_sum(s, axis=2)
+            print("s",s.shape.as_list())
+
+
+            with vs.variable_scope("lstm"):
+              lstmInput = tf.concat([s,a], axis=2)
+              print("inp",lstmInput.shape.as_list())
+
+              #lstmCell = tf.nn.rnn_cell.LSTMCell(1);
+              lstmCell = tf.contrib.rnn.LSTMCell(400);
+              outputs,states = tf.nn.dynamic_rnn(lstmCell, lstmInput, dtype=tf.float32)
+            #cTile = tf.tile(tf.expand_dims(c, 1), [1,num_keys,1])
+            #output = tf.concat([keys, a, cTile], axis=2)
+            print("output",outputs.shape.as_list())
+
+            # Apply dropout
+            output = tf.nn.dropout(outputs, self.keep_prob)
+
+            return output
+
+
+
+
+
 def masked_softmax(logits, mask, dim):
     """
     Takes masked softmax over given dimension of logits.

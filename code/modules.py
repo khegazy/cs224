@@ -159,6 +159,7 @@ class BasicAttn(object):
             This is the attention output; the weighted sum of the values
             (using the attention distribution as weights).
         """
+        print("\n\nbuilding basicattention")
         with vs.variable_scope("BasicAttn"):
 
             # Calculate attention distribution
@@ -209,6 +210,7 @@ class bidirectionalAttn(object):
             This is the attention output; the weighted sum of the values
             (using the attention distribution as weights).
         """
+        print("\n\nbuilding bidirattention")
         with vs.variable_scope("bidirectionalAttn"):
 
             Wvals = tf.get_variable(name="simVals", shape=(self.key_vec_size),
@@ -303,6 +305,7 @@ class coattention(object):
             This is the attention output; the weighted sum of the values
             (using the attention distribution as weights).
         """
+        print("\n\nbuilding coattention")
         with vs.variable_scope("coattention"):
 
             vS = tf.get_variable(name="valSentinel", shape=(1,1,self.value_vec_size),
@@ -312,9 +315,6 @@ class coattention(object):
             mask = tf.ones(name="addMask", shape=(1,1), dtype=tf.int32)
 
 
-            num_values = tf.shape(values)[1]
-            num_keys   = tf.shape(keys)[1]
-
             print("val",values.shape.as_list())
             print("key",keys.shape.as_list())
             valTanh   = tf.contrib.layers.fully_connected(values, self.value_vec_size, activation_fn=tf.nn.tanh) 
@@ -322,6 +322,9 @@ class coattention(object):
             keySent   = tf.concat([keys,tf.tile(kS, [self.batch_size,1,1])], axis=1)
             print("val",valSent.shape.as_list())
             print("key",keySent.shape.as_list())
+
+            num_values = tf.shape(valSent)[1]
+            num_keys   = tf.shape(keySent)[1]
 
             L  = tf.reduce_sum(tf.multiply(
                              tf.tile(tf.expand_dims(keySent, 2), tf.stack([1,1,num_values,1])),
@@ -337,31 +340,31 @@ class coattention(object):
 
             _, alpha = masked_softmax(L, tf.expand_dims(valMask, 1), 2)
             print("alpha",alpha.shape.as_list())
-            a = tf.multiply(tf.expand_dims(alpha, 3), tf.expand_dims(valSent, 1))
+            a = tf.multiply(tf.expand_dims(alpha, 3), tf.expand_dims(valSent, 1), name="m1")
             print("a",a.shape.as_list())
-            a = tf.reduce_sum(a, 2)
+            a = tf.reduce_sum(a, 2, name="rsa")
             print("a",a.shape.as_list())
 
             _, beta = masked_softmax(L, tf.expand_dims(keyMask, 2), 1)
             print("beta",beta.shape.as_list())
             #beta = tf.expand_dims(beta, 2)
-            b = tf.multiply(tf.expand_dims(beta, 3), tf.expand_dims(keySent, 2))
+            b = tf.multiply(tf.expand_dims(beta, 3), tf.expand_dims(keySent, 2), name="m2")
             print("b",b.shape.as_list())
-            b = tf.reduce_sum(b, axis=1)
+            b = tf.reduce_sum(b, axis=1, name="rsb")
             print("b",b.shape.as_list())
 
-            s = tf.multiply(tf.expand_dims(b, 1), tf.expand_dims(keySent, 2))
+            s = tf.multiply(tf.expand_dims(b, 1), tf.expand_dims(keySent, 2), name="m3")
             print("s",s.shape.as_list())
-            s = tf.reduce_sum(s, axis=2)
+            s = tf.reduce_sum(s, axis=2, name="rss")
             print("s",s.shape.as_list())
 
 
             with vs.variable_scope("lstm"):
-              lstmInput = tf.concat([s,a], axis=2)
+              lstmInput = tf.concat([s[:,:-1,:],a[:,:-1,:]], axis=2)
               print("inp",lstmInput.shape.as_list())
 
               #lstmCell = tf.nn.rnn_cell.LSTMCell(1);
-              lstmCell = tf.contrib.rnn.LSTMCell(400);
+              lstmCell = tf.contrib.rnn.LSTMCell(self.key_vec_size);
               outputs,states = tf.nn.dynamic_rnn(lstmCell, lstmInput, dtype=tf.float32)
             #cTile = tf.tile(tf.expand_dims(c, 1), [1,num_keys,1])
             #output = tf.concat([keys, a, cTile], axis=2)
@@ -372,6 +375,42 @@ class coattention(object):
 
             return output
 
+class get_attn_weights(object):
+  
+    def __init__(self, NattnModels, batch_size, question_len, context_len, hidden_size):
+      	self.NattnModels = NattnModels
+        self.batch_size = batch_size
+        self.question_len = question_len
+        self.context_len = context_len
+        self.hidden_size = hidden_size
+
+    def build_graph(self, question_hiddens, attentions, isTraining):
+        with vs.variable_scope("attenWeights"):
+          	#lstmCell = tf.contrib.rnn.LSTMCell(self.hidden_size//2, name="questionCell")
+          	#outputs,states = tf.nn.dynamic_rnn(lstmCell, question_hiddens, dtype=tf.float32)
+          	#lstmOut = tf.reshape(outputs, shape=(self.batch_size, self.question_len*self.hidden_size))
+            qSize = self.question_len*self.hidden_size*2
+            qHiddens  = tf.reshape(question_hiddens, shape=(self.batch_size, qSize))
+            qLinear1   = tf.layers.dense(qHiddens, units=qSize//5)
+            #qNorm1     = tf.layers.batch_normalization(qLinear1, training=isTraining)
+            qNLinear1  = tf.nn.relu(qLinear1)
+            qLinear2   = tf.layers.dense(qNLinear1, units=2*self.hidden_size)
+            #qNorm2     = tf.layers.batch_normalization(qLinear2, training=isTraining)
+            qNLinear2  = tf.nn.relu(qLinear2)
+            qSummary  = tf.layers.dense(qNLinear2, units=self.hidden_size)
+
+            aSize     = attentions.shape.as_list()[2] 
+            inpMask   = tf.concat([attentions, 
+                            tf.tile(tf.expand_dims(qSummary, 1), [1, self.context_len, 1])],
+                            axis=2)
+            mLinear1  = tf.layers.dense(inpMask, units=aSize*1.1)
+            #mNorm1    = tf.layers.batch_normalization(mLinear1, training=isTraining)
+            mNLinear1 = tf.nn.relu(mLinear1)
+            mLinear2  = tf.layers.dense(mNLinear1, units=aSize)
+            #mNorm2    = tf.layers.batch_normalization(mLinear2, training=isTraining)
+            mNLinear2 = tf.nn.relu(mLinear2)
+            mLinear3  = tf.layers.dense(mNLinear2, units=aSize)
+            return tf.sigmoid(mLinear3)
 
 
 

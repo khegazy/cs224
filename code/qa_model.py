@@ -30,7 +30,7 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, bidirectionalAttn, coattention
+from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, bidirectionalAttn, coattention, get_attn_weights
 
 logging.basicConfig(level=logging.INFO)
 
@@ -69,9 +69,15 @@ class QAModel(object):
 
         # Define optimizer and updates
         # (updates is what you need to fetch in session.run to do a gradient update)
-        self.global_step = tf.Variable(0, name="global_step", trainable=False)
-        opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
-        self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+
+		    # batch normalization in tensorflow requires this extra dependency
+  		  # this is required to update the moving mean and moving variance variables
+        extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        with tf.control_dependencies(extra_update_ops):
+
+        		self.global_step = tf.Variable(0, name="global_step", trainable=False)
+        		opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
+        		self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
 
         # Define savers (for checkpointing) and summaries (for tensorboard)
         self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=FLAGS.keep)
@@ -96,6 +102,8 @@ class QAModel(object):
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
         self.keep_prob = tf.placeholder_with_default(1.0, shape=())
 
+        # Add a placeholder for training flag used in batch norm
+        self.isTraining_placeholder = tf.placeholder(tf.bool)
 
     def add_embedding_layer(self, emb_matrix):
         """
@@ -134,18 +142,60 @@ class QAModel(object):
         context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
         question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
 
-        # Use context hidden states to attend to question hidden states
-        #attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        #_, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
+        #####  Calculate multiple attention models  #####
 
-        #attn_layer = bidirectionalAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        #attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)
+        ###  Use context hidden states to attend to question hidden states  ###
+        basicAttn_layer = BasicAttn(self.keep_prob, 
+            self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        # attn_output is shape (batch_size, context_len, hidden_size*2)
+        _, basicAttn_output = basicAttn_layer.build_graph(question_hiddens, 
+            self.qn_mask, context_hiddens) 
 
-        attn_layer = coattention(self.keep_prob, self.FLAGS.batch_size, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens, self.context_mask)
+        ###  Bidirectional attention flow  ###
+        biDirAttn_layer = bidirectionalAttn(self.keep_prob, 
+            self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        # attn_output is shape (batch_size, context_len, 2*hidden_size)
+        biDirAttn_output = biDirAttn_layer.build_graph(question_hiddens, 
+            self.qn_mask, context_hiddens, self.context_mask)
+
+        ###  Coattention  ###
+        coAttn_layer = coattention(self.keep_prob, self.FLAGS.batch_size, 
+            self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        # attn_output is shape (batch_size, context_len, 2*hidden_size)
+        coAttn_output = coAttn_layer.build_graph(question_hiddens, self.qn_mask, 
+            context_hiddens, self.context_mask)
+
+        ###  Combine attention models  ###
+        # Weight attentions
+        attentions = tf.concat([basicAttn_output, biDirAttn_output, coAttn_output], axis=2)
+        attn_weight_calc = get_attn_weights(3, self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.context_len, self.FLAGS.hidden_size)
+        attn_weights = attn_weight_calc.build_graph(question_hiddens, attentions, self.isTraining_placeholder)
+
+        print("attn", attentions.shape.as_list())
+        gatedAttns = tf.multiply(attentions, attn_weights) 
+        print("Gattn", gatedAttns.shape.as_list())
+
+        attnSize = gatedAttns.shape.as_list()[2]
+        layer1 = tf.contrib.layers.fully_connected(gatedAttns, attnSize) 
+        layer2 = tf.contrib.layers.fully_connected(layer1, attnSize) 
+        print("blnd", layer2.shape.as_list())
+        wordStart = tf.concat([layer2[:,0,:], layer2[:,0,:], layer2[:,1,:]], axis=1)
+        wordMidd  = tf.concat([layer2[:,:-2,:], layer2[:,1:-1,:], layer2[:,2:,:]], axis=2)
+        wordEnd   = tf.concat([layer2[:,-2,:], layer2[:,-1,:], layer2[:,-1,:]], axis=1)
+        wordCC    = tf.concat([tf.expand_dims(wordStart, 1), wordMidd, tf.expand_dims(wordEnd, 1)], axis=1)
+        print("wordCC", wordCC.shape.as_list())
+        layer3 = tf.contrib.layers.fully_connected(wordCC, 3*attnSize)
+        layer4 = tf.contrib.layers.fully_connected(layer3, 3*attnSize)
+        layer5 = tf.contrib.layers.fully_connected(layer4, 3*attnSize)
+
+        print("layer5", layer5.shape.as_list())
+        conv1 = tf.contrib.layers.conv2d(layer5, num_outputs=64, kernel_size=[3,3*attnSize])
+        print("conv1", conv1.shape.as_list())
+        conv2 = tf.contrib.layers.conv2d(conv1, num_outputs=64, kernel_size=[3,3*attnSize])
+        print("conv2", conv2.shape.as_list())
 
         # Concat attn_output to context_hiddens to get blended_reps
-        blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
+        blended_reps = tf.concat([context_hiddens, gatedAttns], axis=2) # (batch_size, context_len, hidden_size*4)
 
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
@@ -224,6 +274,7 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
+        input_feed[self.isTraining_placeholder] = True
 
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
@@ -255,6 +306,7 @@ class QAModel(object):
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
+        input_feed[self.isTraining_placeholder] = False
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
         output_feed = [self.loss]
@@ -280,6 +332,7 @@ class QAModel(object):
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
+        input_feed[self.isTraining_placeholder] = False
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
         output_feed = [self.probdist_start, self.probdist_end]

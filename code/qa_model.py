@@ -72,12 +72,11 @@ class QAModel(object):
 
 		    # batch normalization in tensorflow requires this extra dependency
   		  # this is required to update the moving mean and moving variance variables
-        extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        with tf.control_dependencies(extra_update_ops):
-
-        		self.global_step = tf.Variable(0, name="global_step", trainable=False)
-        		opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
-        		self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+        #extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+        #with tf.control_dependencies(extra_update_ops):
+       	self.global_step = tf.Variable(0, name="global_step", trainable=False)
+       	opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
+       	self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
 
         # Define savers (for checkpointing) and summaries (for tensorboard)
         self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=FLAGS.keep)
@@ -175,6 +174,7 @@ class QAModel(object):
         gatedAttns = tf.multiply(attentions, attn_weights) 
         print("Gattn", gatedAttns.shape.as_list())
 
+        """
         attnSize = gatedAttns.shape.as_list()[2]
         layer1 = tf.contrib.layers.fully_connected(gatedAttns, attnSize) 
         layer2 = tf.contrib.layers.fully_connected(layer1, attnSize) 
@@ -189,18 +189,25 @@ class QAModel(object):
         layer5 = tf.contrib.layers.fully_connected(layer4, 3*attnSize)
 
         print("layer5", layer5.shape.as_list())
-        conv1 = tf.contrib.layers.conv2d(layer5, num_outputs=64, kernel_size=[3,3*attnSize])
-        print("conv1", conv1.shape.as_list())
-        conv2 = tf.contrib.layers.conv2d(conv1, num_outputs=64, kernel_size=[3,3*attnSize])
-        print("conv2", conv2.shape.as_list())
+        convInpShape = layer5.shape.as_list()
+        #convInp = tf.reshape(layer5, 
+        #    shape=(self.FLAGS.batch_size, convInpShape[1], convInpShape[2], 1))
+        #conv1 = tf.layers.conv1d(, self.FLAGS.hidden_size, kernel_size=3)
+        #conv1 = tf.contrib.layers.conv2d(convInp, self.FLAGS.hidden_size, kernel_size=[3,3*attnSize])
+        #print("conv1", conv1.shape.as_list())
+        #conv2 = tf.contrib.layers.conv2d(conv1, self.FLAGS.hidden_size, kernel_size=[3,3*attnSize])
+        #print("conv2", conv2.shape.as_list())
+        """
 
         # Concat attn_output to context_hiddens to get blended_reps
-        blended_reps = tf.concat([context_hiddens, gatedAttns], axis=2) # (batch_size, context_len, hidden_size*4)
+        blended_reps = tf.concat([context_hiddens, gatedAttns], axis=2) # (batch_size, context_len, hidden_size*12)
 
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
-        blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+        blended_reps_layer1 = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size*6) 
+        blended_reps_layer2 = tf.contrib.layers.fully_connected(blended_reps_layer1, num_outputs=self.FLAGS.hidden_size*2)
+        blended_reps_final = tf.layers.dense(blended_reps_layer2, self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)

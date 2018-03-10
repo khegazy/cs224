@@ -151,8 +151,8 @@ class QAModel(object):
             self.qn_mask, context_hiddens) 
 
         ###  Bidirectional attention flow  ###
-        biDirAttn_layer = bidirectionalAttn(self.keep_prob, 
-            self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        biDirAttn_layer = bidirectionalAttn(self.keep_prob, self.FLAGS.context_len, 
+            self.FLAGS.hidden_size*2, self.FLAGS.question_len, self.FLAGS.hidden_size*2)
         # attn_output is shape (batch_size, context_len, 2*hidden_size)
         biDirAttn_output = biDirAttn_layer.build_graph(question_hiddens, 
             self.qn_mask, context_hiddens, self.context_mask)

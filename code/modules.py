@@ -180,7 +180,7 @@ class BasicAttn(object):
 
 class bidirectionalAttn(object):
 
-    def __init__(self, keep_prob, key_vec_size, value_vec_size):
+    def __init__(self, keep_prob, num_keys, key_vec_size, num_vals, value_vec_size):
         """
         Inputs:
           keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
@@ -188,7 +188,9 @@ class bidirectionalAttn(object):
           value_vec_size: size of the value vectors. int
         """
         self.keep_prob = keep_prob
+        self.num_keys = num_keys
         self.key_vec_size = key_vec_size
+        self.num_vals = num_vals
         self.value_vec_size = value_vec_size
 
     def build_graph(self, values, values_mask, keys, keys_mask):
@@ -213,6 +215,7 @@ class bidirectionalAttn(object):
         print("\n\nbuilding bidirattention")
         with vs.variable_scope("bidirectionalAttn"):
 
+            print("lens",self.num_vals, self.num_keys)
             Wvals = tf.get_variable(name="simVals", shape=(self.key_vec_size),
                 dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
             Wkeys = tf.get_variable(name="simKeys", shape=(self.key_vec_size),
@@ -220,15 +223,13 @@ class bidirectionalAttn(object):
             Wovrlp = tf.get_variable(name="simOvrlp", shape=(self.key_vec_size),
                 dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
 
-            num_values = tf.shape(values)[1]
-            num_keys   = tf.shape(keys)[1]
 
             simKeys   = tf.reduce_sum(tf.multiply(keys, Wkeys), axis=2) #(batch_size, num_keys)
             simVals   = tf.reduce_sum(tf.multiply(values, Wvals), axis=2) #(batch_size, num_values)
 
             simOvrlp  = tf.reduce_sum(tf.multiply( tf.multiply(
-                                          tf.tile(tf.expand_dims(keys, 2), tf.stack([1,1,num_values,1])),
-                                          tf.tile(tf.expand_dims(values, 1), tf.stack([1,num_keys,1,1]))), Wovrlp), axis=3) #(batch_size, num_keys, num_values)
+                                          tf.tile(tf.expand_dims(keys, 2), tf.stack([1,1,self.num_vals,1])),
+                                          tf.tile(tf.expand_dims(values, 1), tf.stack([1,self.num_keys,1,1]))), Wovrlp), axis=3) #(batch_size, num_keys, num_values)
             #matL = []
             #for ir in range(num_keys):
             #  rowL = []
@@ -237,19 +238,42 @@ class bidirectionalAttn(object):
             #  matL.append(tf.stack(rowL, axis=2))
             #simOvrlp = tf.stack(matL, axis=1)
 
+            """
+            building bidirattention
+            ('s', [None, 600, 30])
+            ('mask', [None, 1, 30])
+            ('alpha', [None, 600, 30])
+            ('a', [None, 600, 30, 400])
+            ('a', [None, 600, 400])
+            ('m', [None, 600])
+            ('b', [None, 600])
+            ('c', [None, 600, 400])
+            ('c', [None, 400])
+            ('output', [None, 600, 1200])
+            """
 
-            S         = tf.tile(tf.expand_dims(simKeys, 2), tf.stack([1,1,num_values])) +\
-                        tf.tile(tf.expand_dims(simVals, 1), tf.stack([1,num_keys,1])) + simOvrlp #(batch_size, num_keys, num_values, 3*vec_size)
+            S         = tf.tile(tf.expand_dims(simKeys, 2), tf.stack([1,1,self.num_vals])) +\
+                        tf.tile(tf.expand_dims(simVals, 1), tf.stack([1,self.num_keys,1])) + simOvrlp #(batch_size, num_keys, num_values, 3*vec_size)
             print("s",S.shape.as_list())
             
             mask = tf.expand_dims(values_mask, 1)
             print("mask",mask.shape.as_list())
             _, alpha = masked_softmax(S, mask, 2)
             print("alpha",alpha.shape.as_list())
+            test = tf.multiply(tf.expand_dims(alpha[:,0,:], 2), values)
+            print("test",test.shape.as_list())
+            test = tf.reduce_sum(test, axis=1)
+            print("test",test.shape.as_list())
+
+            a = tf.stack([tf.reduce_sum(tf.multiply(tf.expand_dims(alpha[:,i,:], 2), values), axis=1) for i in range(self.num_keys)], axis=1)
+            print("a",a.shape.as_list())
+
+            """
             a = tf.multiply(tf.expand_dims(alpha, 3), tf.expand_dims(values, 1))
             print("a",a.shape.as_list())
             a = tf.reduce_sum(a, 2)
             print("a",a.shape.as_list())
+            """
 
             m = tf.reduce_max(S, axis=2)
             print("m",m.shape.as_list())
@@ -261,7 +285,7 @@ class bidirectionalAttn(object):
             c = tf.reduce_sum(c, axis=1)
             print("c",c.shape.as_list())
 
-            cTile = tf.tile(tf.expand_dims(c, 1), [1,num_keys,1])
+            cTile = tf.tile(tf.expand_dims(c, 1), [1,self.num_keys,1])
             output = tf.concat([keys, a, cTile], axis=2)
             print("output",output.shape.as_list())
 

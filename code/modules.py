@@ -215,7 +215,6 @@ class bidirectionalAttn(object):
         print("\n\nbuilding bidirattention")
         with vs.variable_scope("bidirectionalAttn"):
 
-            print("lens",self.num_vals, self.num_keys)
             Wvals = tf.get_variable(name="simVals", shape=(self.key_vec_size),
                 dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
             Wkeys = tf.get_variable(name="simKeys", shape=(self.key_vec_size),
@@ -230,9 +229,13 @@ class bidirectionalAttn(object):
             simVals   = tf.reduce_sum(tf.multiply(values, Wvals), axis=2)
 
             #(batch_size, num_keys, num_values)
-            simOvrlp  = tf.reduce_sum(tf.multiply( tf.multiply(
-                                          tf.tile(tf.expand_dims(keys, 2), tf.stack([1,1,self.num_vals,1])),
-                                          tf.tile(tf.expand_dims(values, 1), tf.stack([1,self.num_keys,1,1]))), Wovrlp), axis=3)
+            simOvrlp = tf.stack([tf.reduce_sum(
+                                    tf.multiply(
+                                      tf.expand_dims(keys[:,i,:], 1), values), 
+                                    axis=2) 
+                                  for i in range(self.num_keys)], 
+                                axis=1)
+            print("simOverlp", simOvrlp.shape.as_list())
 
             #(batch_size, num_keys, num_values, 3*vec_size)
             S         = tf.tile(tf.expand_dims(simKeys, 2), tf.stack([1,1,self.num_vals])) +\
@@ -321,9 +324,12 @@ class coattention(object):
             valSent   = tf.concat([valTanh,tf.tile(vS, [self.batch_size,1,1])], axis=1)
             keySent   = tf.concat([keys,tf.tile(kS, [self.batch_size,1,1])], axis=1)
 
-            L  = tf.reduce_sum(tf.multiply(
-                             tf.tile(tf.expand_dims(keySent, 2), tf.stack([1,1,self.num_vals+1,1])),
-                             tf.tile(tf.expand_dims(valSent, 1), tf.stack([1,self.num_keys+1,1,1]))), axis=3) #(batch_size, num_keys, num_values)
+            L = tf.stack([tf.reduce_sum(
+                            tf.multiply(
+                              tf.expand_dims(keySent[:,i,:], 1), valSent), 
+                            axis=2) 
+                          for i in range(self.num_keys+1)], 
+                        axis=1)
            
             print("L",L.shape.as_list())
             valMask = tf.concat([values_mask,tf.tile(mask,[self.batch_size,1])], axis=1)

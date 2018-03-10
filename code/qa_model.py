@@ -158,8 +158,8 @@ class QAModel(object):
             self.qn_mask, context_hiddens, self.context_mask)
 
         ###  Coattention  ###
-        coAttn_layer = coattention(self.keep_prob, self.FLAGS.batch_size, 
-            self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        coAttn_layer = coattention(self.keep_prob, self.FLAGS.batch_size, self.FLAGS.context_len, 
+            self.FLAGS.hidden_size*2, self.FLAGS.question_len, self.FLAGS.hidden_size*2)
         # attn_output is shape (batch_size, context_len, 2*hidden_size)
         coAttn_output = coAttn_layer.build_graph(question_hiddens, self.qn_mask, 
             context_hiddens, self.context_mask)

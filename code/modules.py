@@ -224,44 +224,29 @@ class bidirectionalAttn(object):
 
 
             #(batch_size, num_keys)
-            simKeys   = tf.reduce_sum(tf.multiply(keys, Wkeys), axis=2)
+            simKeys   = tf.einsum('sij,j->si', keys, Wkeys)
             #(batch_size, num_values)
-            simVals   = tf.reduce_sum(tf.multiply(values, Wvals), axis=2)
+            simVals   = tf.einsum('sij,j->si', values, Wvals)
 
             #(batch_size, num_keys, num_values)
-            simOvrlp = tf.stack([tf.reduce_sum(
-                                    tf.multiply(
-                                      tf.expand_dims(keys[:,i,:], 1), values), 
-                                    axis=2) 
-                                  for i in range(self.num_keys)], 
-                                axis=1)
+            simOvrlp = tf.einsum('sij,skj->sik', keys, values)
             print("simOverlp", simOvrlp.shape.as_list())
 
             #(batch_size, num_keys, num_values, 3*vec_size)
-            S         = tf.tile(tf.expand_dims(simKeys, 2), tf.stack([1,1,self.num_vals])) +\
-                        tf.tile(tf.expand_dims(simVals, 1), tf.stack([1,self.num_keys,1])) + simOvrlp
+            S         = tf.expand_dims(simKeys, 2) + tf.expand_dims(simVals, 1) + simOvrlp
             print("s",S.shape.as_list())
             
-            mask = tf.expand_dims(values_mask, 1)
-            print("mask",mask.shape.as_list())
-            _, alpha = masked_softmax(S, mask, 2)
+            _, alpha = masked_softmax(S, tf.expand_dims(values_mask, 1), 2)
             print("alpha",alpha.shape.as_list())
 
-            a = tf.stack([tf.reduce_sum(
-                            tf.multiply(
-                              tf.expand_dims(alpha[:,i,:], 2), values), axis=1) 
-                            for i in range(self.num_keys)], 
-                          axis=1)
+            a = tf.einsum('sij,sjk->sik', alpha, values)
             print("a",a.shape.as_list())
 
             m = tf.reduce_max(S, axis=2)
             print("m",m.shape.as_list())
             _, beta = masked_softmax(m, keys_mask, 1)
-            print("b",beta.shape.as_list())
-            beta = tf.expand_dims(beta, 2)
-            c = tf.multiply(beta, keys)
-            print("c",c.shape.as_list())
-            c = tf.reduce_sum(c, axis=1)
+            print("beta",beta.shape.as_list())
+            c = tf.einsum('si,sij->sj', beta, keys)
             print("c",c.shape.as_list())
 
             cTile = tf.tile(tf.expand_dims(c, 1), [1,self.num_keys,1])
@@ -324,44 +309,54 @@ class coattention(object):
             valSent   = tf.concat([valTanh,tf.tile(vS, [self.batch_size,1,1])], axis=1)
             keySent   = tf.concat([keys,tf.tile(kS, [self.batch_size,1,1])], axis=1)
 
+            L = tf.einsum('sij,skj->sik', keySent, valSent)
+            """
             L = tf.stack([tf.reduce_sum(
                             tf.multiply(
                               tf.expand_dims(keySent[:,i,:], 1), valSent), 
                             axis=2) 
                           for i in range(self.num_keys+1)], 
                         axis=1)
+                        """
            
             print("L",L.shape.as_list())
             valMask = tf.concat([values_mask,tf.tile(mask,[self.batch_size,1])], axis=1)
             keyMask = tf.concat([keys_mask,tf.tile(mask,[self.batch_size,1])], axis=1)
-            print("vmask",valMask.shape.as_list())
-            print("kmask",keyMask.shape.as_list())
 
             _, alpha = masked_softmax(L, tf.expand_dims(valMask, 1), 2)
             print("alpha",alpha.shape.as_list())
+            a = tf.einsum('sij,sjk->sik', alpha, valSent)
+            """
             a = tf.stack([tf.reduce_sum(
                             tf.multiply(
                               tf.expand_dims(alpha[:,i,:], 2), valSent), axis=1) 
                             for i in range(self.num_keys+1)], 
                           axis=1)
+                          """
 
             print("a",a.shape.as_list())
 
             _, beta = masked_softmax(L, tf.expand_dims(keyMask, 2), 1)
             print("beta",beta.shape.as_list())
             #beta = tf.expand_dims(beta, 2)
+            b = tf.einsum('sij,sik->sjk', beta, keySent)
+            """
             b = tf.stack([tf.reduce_sum(
                             tf.multiply(
                               tf.expand_dims(beta[:,:,i], 2), keySent), axis=1) 
                             for i in range(self.num_vals+1)], 
                           axis=1)
+                          """
 
             print("b",b.shape.as_list())
+            s = tf.einsum('sij,sjk->sik', alpha, b)
+            """
             s = tf.stack([tf.reduce_sum(
                             tf.multiply(
                               tf.expand_dims(alpha[:,i,:], 2), b), axis=1) 
                             for i in range(self.num_keys+1)], 
                           axis=1)
+                          """
 
             print("s",s.shape.as_list())
 

@@ -183,7 +183,6 @@ class QAModel(object):
         attn_weight_calc = get_attn_weights(2, self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.context_len, self.FLAGS.hidden_size)
         attn_weights = attn_weight_calc.build_graph(question_hiddens, attentions, self.isTraining_placeholder)
 
-        print("attn", attentions.shape.as_list())
         gatedAttns = tf.multiply(attentions, attn_weights) 
         print("Gattn", gatedAttns.shape.as_list())
 
@@ -218,8 +217,8 @@ class QAModel(object):
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
-        blended_reps_layer1 = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size*6) 
-        blended_reps_layer2 = tf.contrib.layers.fully_connected(blended_reps_layer1, num_outputs=self.FLAGS.hidden_size*2)
+        blended_reps_layer1 = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size*2) 
+        blended_reps_layer2 = tf.contrib.layers.fully_connected(blended_reps_layer1, num_outputs=self.FLAGS.hidden_size)
         blended_reps_final = tf.layers.dense(blended_reps_layer2, self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
         # Use softmax layer to compute probability distribution for start location

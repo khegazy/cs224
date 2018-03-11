@@ -33,7 +33,7 @@ class RNNEncoder(object):
     still applies because we're getting a different "encoding" of each
     position in the sequence, and we'll use the encodings downstream in the model.
 
-    This code uses a bidirectional GRU, but you could experiment with other types of RNN.
+    This code uses a bidirectional LSTM, but you could experiment with other types of RNN.
     """
 
     def __init__(self, hidden_size, keep_prob):
@@ -44,9 +44,9 @@ class RNNEncoder(object):
         """
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
-        self.rnn_cell_fw = rnn_cell.GRUCell(self.hidden_size)
+        self.rnn_cell_fw = rnn_cell.LSTMCell(self.hidden_size)
         self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
+        self.rnn_cell_bw = rnn_cell.LSTMCell(self.hidden_size)
         self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
 
     def build_graph(self, inputs, masks):
@@ -184,7 +184,9 @@ class bidirectionalAttn(object):
         """
         Inputs:
           keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          num_keys: size of keys sentence. int
           key_vec_size: size of the key vectors. int
+          num_vals: size of values sentence. int
           value_vec_size: size of the value vectors. int
         """
         self.keep_prob = keep_prob
@@ -203,16 +205,15 @@ class bidirectionalAttn(object):
           values_mask: Tensor shape (batch_size, num_values).
             1s where there's real input, 0s where there's padding
           keys: Tensor shape (batch_size, num_keys, value_vec_size)
+          keys_mask: Tensor shape (batch_size, num_keys).
+            1s where there's real input, 0s where there's padding
 
         Outputs:
-          attn_dist: Tensor shape (batch_size, num_keys, num_values).
-            For each key, the distribution should sum to 1,
-            and should be 0 in the value locations that correspond to padding.
           output: Tensor shape (batch_size, num_keys, hidden_size).
             This is the attention output; the weighted sum of the values
             (using the attention distribution as weights).
         """
-        print("\n\nbuilding bidirattention")
+        print("\nbuilding bidirattention")
         with vs.variable_scope("bidirectionalAttn"):
 
             Wvals = tf.get_variable(name="simVals", shape=(self.key_vec_size),
@@ -229,29 +230,20 @@ class bidirectionalAttn(object):
             simVals   = tf.einsum('sij,j->si', values, Wvals)
 
             #(batch_size, num_keys, num_values)
-            simOvrlp = tf.einsum('sij,skj->sik', keys, values)
-            print("simOverlp", simOvrlp.shape.as_list())
+            simOvrlp  = tf.einsum('sij,skj->sik', keys, values)
 
             #(batch_size, num_keys, num_values, 3*vec_size)
             S         = tf.expand_dims(simKeys, 2) + tf.expand_dims(simVals, 1) + simOvrlp
-            print("s",S.shape.as_list())
             
             _, alpha = masked_softmax(S, tf.expand_dims(values_mask, 1), 2)
-            print("alpha",alpha.shape.as_list())
-
             a = tf.einsum('sij,sjk->sik', alpha, values)
-            print("a",a.shape.as_list())
 
             m = tf.reduce_max(S, axis=2)
-            print("m",m.shape.as_list())
             _, beta = masked_softmax(m, keys_mask, 1)
-            print("beta",beta.shape.as_list())
             c = tf.einsum('si,sij->sj', beta, keys)
-            print("c",c.shape.as_list())
 
             cTile = tf.tile(tf.expand_dims(c, 1), [1,self.num_keys,1])
             output = tf.concat([keys, a, cTile], axis=2)
-            print("output",output.shape.as_list())
 
             # Apply dropout
             output = tf.nn.dropout(output, self.keep_prob)
@@ -266,7 +258,10 @@ class coattention(object):
         """
         Inputs:
           keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          batch_size: size of batch. int
+          num_keys: size of keys sentence. int
           key_vec_size: size of the key vectors. int
+          num_vals: size of values sentence. int
           value_vec_size: size of the value vectors. int
         """
         self.keep_prob = keep_prob
@@ -286,16 +281,15 @@ class coattention(object):
           values_mask: Tensor shape (batch_size, num_values).
             1s where there's real input, 0s where there's padding
           keys: Tensor shape (batch_size, num_keys, value_vec_size)
+          keys_mask: Tensor shape (batch_size, num_keys).
+            1s where there's real input, 0s where there's padding
 
         Outputs:
-          attn_dist: Tensor shape (batch_size, num_keys, num_values).
-            For each key, the distribution should sum to 1,
-            and should be 0 in the value locations that correspond to padding.
           output: Tensor shape (batch_size, num_keys, hidden_size).
             This is the attention output; the weighted sum of the values
             (using the attention distribution as weights).
         """
-        print("\n\nbuilding coattention")
+        print("\nbuilding coattention")
         with vs.variable_scope("coattention"):
 
             vS = tf.get_variable(name="valSentinel", shape=(1,1,self.value_vec_size),
@@ -304,73 +298,29 @@ class coattention(object):
                 dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
             mask = tf.ones(name="addMask", shape=(1,1), dtype=tf.int32)
 
-
             valTanh   = tf.contrib.layers.fully_connected(values, self.value_vec_size, activation_fn=tf.nn.tanh) 
             valSent   = tf.concat([valTanh,tf.tile(vS, [self.batch_size,1,1])], axis=1)
             keySent   = tf.concat([keys,tf.tile(kS, [self.batch_size,1,1])], axis=1)
-
-            L = tf.einsum('sij,skj->sik', keySent, valSent)
-            """
-            L = tf.stack([tf.reduce_sum(
-                            tf.multiply(
-                              tf.expand_dims(keySent[:,i,:], 1), valSent), 
-                            axis=2) 
-                          for i in range(self.num_keys+1)], 
-                        axis=1)
-                        """
-           
-            print("L",L.shape.as_list())
             valMask = tf.concat([values_mask,tf.tile(mask,[self.batch_size,1])], axis=1)
             keyMask = tf.concat([keys_mask,tf.tile(mask,[self.batch_size,1])], axis=1)
 
-            _, alpha = masked_softmax(L, tf.expand_dims(valMask, 1), 2)
-            print("alpha",alpha.shape.as_list())
-            a = tf.einsum('sij,sjk->sik', alpha, valSent)
-            """
-            a = tf.stack([tf.reduce_sum(
-                            tf.multiply(
-                              tf.expand_dims(alpha[:,i,:], 2), valSent), axis=1) 
-                            for i in range(self.num_keys+1)], 
-                          axis=1)
-                          """
 
-            print("a",a.shape.as_list())
+            L = tf.einsum('sij,skj->sik', keySent, valSent)
+
+            _, alpha = masked_softmax(L, tf.expand_dims(valMask, 1), 2)
+            a = tf.einsum('sij,sjk->sik', alpha, valSent)
 
             _, beta = masked_softmax(L, tf.expand_dims(keyMask, 2), 1)
-            print("beta",beta.shape.as_list())
-            #beta = tf.expand_dims(beta, 2)
             b = tf.einsum('sij,sik->sjk', beta, keySent)
-            """
-            b = tf.stack([tf.reduce_sum(
-                            tf.multiply(
-                              tf.expand_dims(beta[:,:,i], 2), keySent), axis=1) 
-                            for i in range(self.num_vals+1)], 
-                          axis=1)
-                          """
 
-            print("b",b.shape.as_list())
             s = tf.einsum('sij,sjk->sik', alpha, b)
-            """
-            s = tf.stack([tf.reduce_sum(
-                            tf.multiply(
-                              tf.expand_dims(alpha[:,i,:], 2), b), axis=1) 
-                            for i in range(self.num_keys+1)], 
-                          axis=1)
-                          """
-
-            print("s",s.shape.as_list())
 
 
             with vs.variable_scope("lstm"):
               lstmInput = tf.concat([s[:,:-1,:],a[:,:-1,:]], axis=2)
-              print("inp",lstmInput.shape.as_list())
 
-              #lstmCell = tf.nn.rnn_cell.LSTMCell(1);
               lstmCell = tf.contrib.rnn.LSTMCell(self.key_vec_size);
               outputs,states = tf.nn.dynamic_rnn(lstmCell, lstmInput, dtype=tf.float32)
-            #cTile = tf.tile(tf.expand_dims(c, 1), [1,num_keys,1])
-            #output = tf.concat([keys, a, cTile], axis=2)
-            print("output",outputs.shape.as_list())
 
             # Apply dropout
             output = tf.nn.dropout(outputs, self.keep_prob)

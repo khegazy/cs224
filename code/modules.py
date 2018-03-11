@@ -393,9 +393,6 @@ class get_attn_weights(object):
 
     def build_graph(self, question_hiddens, attentions, isTraining):
         with vs.variable_scope("attenWeights"):
-          	#lstmCell = tf.contrib.rnn.LSTMCell(self.hidden_size//2, name="questionCell")
-          	#outputs,states = tf.nn.dynamic_rnn(lstmCell, question_hiddens, dtype=tf.float32)
-          	#lstmOut = tf.reshape(outputs, shape=(self.batch_size, self.question_len*self.hidden_size))
             qSize = self.question_len*self.hidden_size*2
             qHiddens  = tf.reshape(question_hiddens, shape=(self.batch_size, qSize))
             qLinear1   = tf.layers.dense(qHiddens, units=qSize//5)
@@ -410,13 +407,10 @@ class get_attn_weights(object):
             inpMask   = tf.concat([attentions, 
                             tf.tile(tf.expand_dims(qSummary, 1), [1, self.context_len, 1])],
                             axis=2)
-            mLinear1  = tf.layers.dense(inpMask, units=aSize*1.1)
+            mLinear1  = tf.layers.dense(inpMask, units=aSize)
             #mNorm1    = tf.layers.batch_normalization(mLinear1, training=isTraining)
             mNLinear1 = tf.nn.relu(mLinear1)
-            mLinear2  = tf.layers.dense(mNLinear1, units=aSize)
-            #mNorm2    = tf.layers.batch_normalization(mLinear2, training=isTraining)
-            mNLinear2 = tf.nn.relu(mLinear2)
-            mLinear3  = tf.layers.dense(mNLinear2, units=aSize)
+            mLinear3  = tf.layers.dense(mNLinear1, units=aSize)
             return tf.sigmoid(mLinear3)
 
 

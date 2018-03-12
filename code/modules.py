@@ -296,13 +296,14 @@ class coattention(object):
                 dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
             kS = tf.get_variable(name="keySentinel", shape=(1,1,self.key_vec_size),
                 dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
-            mask = tf.ones(name="addMask", shape=(1,1), dtype=tf.int32)
+            vmask = tf.ones(name="addMask", shape=(1,1), dtype=tf.int32)
+            kmask = tf.ones(name="addMask", shape=(1,1), dtype=tf.int32)
 
             valTanh   = tf.contrib.layers.fully_connected(values, self.value_vec_size, activation_fn=tf.nn.tanh) 
             valSent   = tf.concat([valTanh,tf.tile(vS, [self.batch_size,1,1])], axis=1)
             keySent   = tf.concat([keys,tf.tile(kS, [self.batch_size,1,1])], axis=1)
-            valMask = tf.concat([values_mask,tf.tile(mask,[self.batch_size,1])], axis=1)
-            keyMask = tf.concat([keys_mask,tf.tile(mask,[self.batch_size,1])], axis=1)
+            valMask = tf.concat([values_mask,tf.tile(vmask,[self.batch_size,1])], axis=1)
+            keyMask = tf.concat([keys_mask,tf.tile(kmask,[self.batch_size,1])], axis=1)
 
 
             L = tf.einsum('sij,skj->sik', keySent, valSent)

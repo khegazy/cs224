@@ -180,7 +180,8 @@ class QAModel(object):
         ###  Combine attention models  ###
         # Weight attentions
         attentions = tf.concat([biDir_output, coAttn_output], axis=2)
-        attn_weight_calc = get_attn_weights(2, self.FLAGS.question_len, self.FLAGS.context_len, self.FLAGS.hidden_size)
+        attn_weight_calc = get_attn_weights(2, self.FLAGS.question_len, self.FLAGS.context_len, 
+            self.FLAGS.hidden_size, self.keep_prob)
         attn_weights = attn_weight_calc.build_graph(question_hiddens, attentions)
 
         gatedAttns = tf.multiply(attentions, attn_weights) 
@@ -193,9 +194,9 @@ class QAModel(object):
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
         blended_reps_layer1 = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size*2) 
-        blended_reps_layer1_DO = = tf.nn.dropout(blended_reps_layer1, self.keep_prob) 
+        blended_reps_layer1_DO = tf.nn.dropout(blended_reps_layer1, self.keep_prob) 
         blended_reps_layer2 = tf.contrib.layers.fully_connected(blended_reps_layer1_DO, num_outputs=self.FLAGS.hidden_size)
-        blended_reps_layer2_DO = = tf.nn.dropout(blended_reps_layer2, self.keep_prob) 
+        blended_reps_layer2_DO = tf.nn.dropout(blended_reps_layer2, self.keep_prob) 
         blended_reps_final = tf.layers.dense(blended_reps_layer2_DO, self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
 

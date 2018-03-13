@@ -330,11 +330,12 @@ class coattention(object):
 
 class get_attn_weights(object):
   
-    def __init__(self, NattnModels, question_len, context_len, hidden_size):
+    def __init__(self, NattnModels, question_len, context_len, hidden_size, keep_prob):
       	self.NattnModels = NattnModels
         self.question_len = question_len
         self.context_len = context_len
         self.hidden_size = hidden_size
+        self.keep_prob = keep_prob
 
     def build_graph(self, question_hiddens, attentions):
         with vs.variable_scope("attenWeights"):
@@ -342,9 +343,9 @@ class get_attn_weights(object):
             qSize = self.question_len*self.hidden_size*2
             qHiddens  = tf.reshape(question_hiddens, shape=tf.stack([batch_size, qSize]))
             qLayer1   = tf.contrib.layers.fully_connected(qHiddens, qSize//5)
-            qLayer1DO = tf.nn.dropout(output, self.keep_prob)
+            qLayer1DO = tf.nn.dropout(qLayer1, self.keep_prob)
             qSummary  = tf.layers.dense(qLayer1DO, units=self.hidden_size)
-            qSummaryDO= tf.nn.dropout(output, self.keep_prob)
+            qSummaryDO= tf.nn.dropout(qSummary, self.keep_prob)
 
             aSize     = attentions.shape.as_list()[2] 
             inpMask   = tf.concat([attentions, 
@@ -352,7 +353,7 @@ class get_attn_weights(object):
                             axis=2)
             mLayer1   = tf.contrib.layers.fully_connected(inpMask, aSize)
             mLayer1DO = tf.nn.dropout(mLayer1, self.keep_prob)
-            mSummary  = tf.layers.dense(mLayer1, units=aSize)
+            mSummary  = tf.layers.dense(mLayer1DO, units=aSize)
             mSummaryDO= tf.nn.dropout(mSummary, self.keep_prob)
             return tf.sigmoid(mSummaryDO)
 

@@ -342,15 +342,19 @@ class get_attn_weights(object):
             qSize = self.question_len*self.hidden_size*2
             qHiddens  = tf.reshape(question_hiddens, shape=tf.stack([batch_size, qSize]))
             qLayer1   = tf.contrib.layers.fully_connected(qHiddens, qSize//5)
-            qSummary  = tf.layers.dense(qLayer1, units=self.hidden_size)
+            qLayer1DO = tf.nn.dropout(output, self.keep_prob)
+            qSummary  = tf.layers.dense(qLayer1DO, units=self.hidden_size)
+            qSummaryDO= tf.nn.dropout(output, self.keep_prob)
 
             aSize     = attentions.shape.as_list()[2] 
             inpMask   = tf.concat([attentions, 
-                            tf.tile(tf.expand_dims(qSummary, 1), [1, self.context_len, 1])],
+                            tf.tile(tf.expand_dims(qSummaryDO, 1), [1, self.context_len, 1])],
                             axis=2)
-            mLayer1  = tf.contrib.layers.fully_connected(inpMask, aSize)
+            mLayer1   = tf.contrib.layers.fully_connected(inpMask, aSize)
+            mLayer1DO = tf.nn.dropout(mLayer1, self.keep_prob)
             mSummary  = tf.layers.dense(mLayer1, units=aSize)
-            return tf.sigmoid(mSummary)
+            mSummaryDO= tf.nn.dropout(mSummary, self.keep_prob)
+            return tf.sigmoid(mSummaryDO)
 
 
 

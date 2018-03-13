@@ -193,8 +193,10 @@ class QAModel(object):
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
         blended_reps_layer1 = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size*2) 
-        blended_reps_layer2 = tf.contrib.layers.fully_connected(blended_reps_layer1, num_outputs=self.FLAGS.hidden_size)
-        blended_reps_final = tf.layers.dense(blended_reps_layer2, self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+        blended_reps_layer1_DO = = tf.nn.dropout(blended_reps_layer1, self.keep_prob) 
+        blended_reps_layer2 = tf.contrib.layers.fully_connected(blended_reps_layer1_DO, num_outputs=self.FLAGS.hidden_size)
+        blended_reps_layer2_DO = = tf.nn.dropout(blended_reps_layer2, self.keep_prob) 
+        blended_reps_final = tf.layers.dense(blended_reps_layer2_DO, self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
 
         """

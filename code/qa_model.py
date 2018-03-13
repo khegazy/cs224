@@ -212,7 +212,7 @@ class QAModel(object):
         conv2 = tf.layers.conv1d(FClayer2, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
         print("conv2", conv1.shape.as_list())
 
-        lstmInp = tf.concat([conv2, attentions, context_hiddens], axis=2)
+        lstmInp = tf.concat([conv1, conv2, attentions, context_hiddens], axis=2)
 
         with vs.variable_scope("outputLSTM"):
            lstmCell = rnn_cell.LSTMCell(self.FLAGS.hidden_size*2)

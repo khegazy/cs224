@@ -254,7 +254,7 @@ class bidirectionalAttn(object):
 
 class coattention(object):
 
-    def __init__(self, keep_prob, batch_size, num_keys, key_vec_size, num_vals, value_vec_size):
+    def __init__(self, keep_prob, num_keys, key_vec_size, num_vals, value_vec_size):
         """
         Inputs:
           keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
@@ -265,7 +265,6 @@ class coattention(object):
           value_vec_size: size of the value vectors. int
         """
         self.keep_prob = keep_prob
-        self.batch_size = batch_size
         self.num_keys = num_keys
         self.key_vec_size = key_vec_size
         self.num_vals = num_vals
@@ -292,18 +291,19 @@ class coattention(object):
         print("\nbuilding coattention")
         with vs.variable_scope("coattention"):
 
+            batch_size = tf.shape(values)[0]
             vS = tf.get_variable(name="valSentinel", shape=(1,1,self.value_vec_size),
                 dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
             kS = tf.get_variable(name="keySentinel", shape=(1,1,self.key_vec_size),
                 dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer())
-            vmask = tf.ones(name="addMask", shape=(1,1), dtype=tf.int32)
-            kmask = tf.ones(name="addMask", shape=(1,1), dtype=tf.int32)
+            vmask = tf.ones(name="addMask", shape=tf.stack([batch_size,1]), dtype=tf.int32)
+            kmask = tf.ones(name="addMask", shape=tf.stack([batch_size,1]), dtype=tf.int32)
 
             valTanh   = tf.contrib.layers.fully_connected(values, self.value_vec_size, activation_fn=tf.nn.tanh) 
-            valSent   = tf.concat([valTanh,tf.tile(vS, [self.batch_size,1,1])], axis=1)
-            keySent   = tf.concat([keys,tf.tile(kS, [self.batch_size,1,1])], axis=1)
-            valMask = tf.concat([values_mask,tf.tile(vmask,[self.batch_size,1])], axis=1)
-            keyMask = tf.concat([keys_mask,tf.tile(kmask,[self.batch_size,1])], axis=1)
+            valSent   = tf.concat([valTanh,tf.tile(vS, tf.stack([batch_size,1,1]))], axis=1)
+            keySent   = tf.concat([keys,tf.tile(kS, tf.stack([batch_size,1,1]))], axis=1)
+            valMask = tf.concat([values_mask,vmask], axis=1)
+            keyMask = tf.concat([keys_mask,kmask], axis=1)
 
 
             L = tf.einsum('sij,skj->sik', keySent, valSent)
@@ -330,34 +330,27 @@ class coattention(object):
 
 class get_attn_weights(object):
   
-    def __init__(self, NattnModels, batch_size, question_len, context_len, hidden_size):
+    def __init__(self, NattnModels, question_len, context_len, hidden_size):
       	self.NattnModels = NattnModels
-        self.batch_size = batch_size
         self.question_len = question_len
         self.context_len = context_len
         self.hidden_size = hidden_size
 
-    def build_graph(self, question_hiddens, attentions, isTraining):
+    def build_graph(self, question_hiddens, attentions):
         with vs.variable_scope("attenWeights"):
+            batch_size = tf.shape(attentions)[0]
             qSize = self.question_len*self.hidden_size*2
-            qHiddens  = tf.reshape(question_hiddens, shape=(self.batch_size, qSize))
-            qLinear1   = tf.layers.dense(qHiddens, units=qSize//5)
-            #qNorm1     = tf.layers.batch_normalization(qLinear1, training=isTraining)
-            qNLinear1  = tf.nn.relu(qLinear1)
-            qLinear2   = tf.layers.dense(qNLinear1, units=2*self.hidden_size)
-            #qNorm2     = tf.layers.batch_normalization(qLinear2, training=isTraining)
-            qNLinear2  = tf.nn.relu(qLinear2)
-            qSummary  = tf.layers.dense(qNLinear2, units=self.hidden_size)
+            qHiddens  = tf.reshape(question_hiddens, shape=tf.stack([batch_size, qSize]))
+            qLayer1   = tf.contrib.layers.fully_connected(qHiddens, qSize//5)
+            qSummary  = tf.layers.dense(qLayer1, units=self.hidden_size)
 
             aSize     = attentions.shape.as_list()[2] 
             inpMask   = tf.concat([attentions, 
                             tf.tile(tf.expand_dims(qSummary, 1), [1, self.context_len, 1])],
                             axis=2)
-            mLinear1  = tf.layers.dense(inpMask, units=aSize)
-            #mNorm1    = tf.layers.batch_normalization(mLinear1, training=isTraining)
-            mNLinear1 = tf.nn.relu(mLinear1)
-            mLinear3  = tf.layers.dense(mNLinear1, units=aSize)
-            return tf.sigmoid(mLinear3)
+            mLayer1  = tf.contrib.layers.fully_connected(inpMask, aSize)
+            mSummary  = tf.layers.dense(mLayer1, units=aSize)
+            return tf.sigmoid(mSummary)
 
 
 

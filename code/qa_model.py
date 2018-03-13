@@ -103,8 +103,6 @@ class QAModel(object):
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
         self.keep_prob = tf.placeholder_with_default(1.0, shape=())
 
-        # Add a placeholder for training flag used in batch norm
-        self.isTraining_placeholder = tf.placeholder(tf.bool)
 
     def add_embedding_layer(self, emb_matrix):
         """
@@ -169,7 +167,7 @@ class QAModel(object):
 
 
         ###  Coattention  ###
-        coAttn_layer = coattention(self.keep_prob, self.FLAGS.batch_size, self.FLAGS.context_len, 
+        coAttn_layer = coattention(self.keep_prob, self.FLAGS.context_len, 
             self.FLAGS.hidden_size*2, self.FLAGS.question_len, self.FLAGS.hidden_size*2)
         # attn_output is shape (batch_size, context_len, 2*hidden_size)
         coAttn_output = coAttn_layer.build_graph(question_hiddens, self.qn_mask, 
@@ -182,13 +180,13 @@ class QAModel(object):
         ###  Combine attention models  ###
         # Weight attentions
         attentions = tf.concat([biDir_output, coAttn_output], axis=2)
-        attn_weight_calc = get_attn_weights(2, self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.context_len, self.FLAGS.hidden_size)
-        attn_weights = attn_weight_calc.build_graph(question_hiddens, attentions, self.isTraining_placeholder)
+        attn_weight_calc = get_attn_weights(2, self.FLAGS.question_len, self.FLAGS.context_len, self.FLAGS.hidden_size)
+        attn_weights = attn_weight_calc.build_graph(question_hiddens, attentions)
 
         gatedAttns = tf.multiply(attentions, attn_weights) 
         print("Gattn", gatedAttns.shape.as_list())
-        # Concat attn_output to context_hiddens to get blended_reps
 
+        # Concat attn_output to context_hiddens to get blended_reps
         blended_reps = tf.concat([context_hiddens, gatedAttns], axis=2) # (batch_size, context_len, hidden_size*12)
 
         # Apply fully connected layer to each blended representation
@@ -199,49 +197,46 @@ class QAModel(object):
         blended_reps_final = tf.layers.dense(blended_reps_layer2, self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
 
+        """
         attnSize = gatedAttns.shape.as_list()[2]
-        layer1 = tf.contrib.layers.fully_connected(gatedAttns, attnSize, scope="FC1") 
-        layer2 = tf.contrib.layers.fully_connected(layer1, attnSize, scope="FC2") 
-        print("blnd", layer2.shape.as_list())
-        wordStart = tf.concat([layer2[:,0,:], layer2[:,0,:], layer2[:,1,:]], axis=1, name="wStart")
-        wordMidd  = tf.concat([layer2[:,:-2,:], layer2[:,1:-1,:], layer2[:,2:,:]], axis=2, name="wMidd")
-        wordEnd   = tf.concat([layer2[:,-2,:], layer2[:,-1,:], layer2[:,-1,:]], axis=1, name="wEnd")
+        FClayer1 = tf.contrib.layers.fully_connected(gatedAttns, attnSize, scope="FC1") 
+
+        wordStart = tf.concat([FClayer1[:,0,:],   FClayer1[:,0,:],    FClayer1[:,1,:]],  axis=1, name="wStart")
+        wordMidd  = tf.concat([FClayer1[:,:-2,:], FClayer1[:,1:-1,:], FClayer1[:,2:,:]], axis=2, name="wMidd")
+        wordEnd   = tf.concat([FClayer1[:,-2,:],  FClayer1[:,-1,:],   FClayer1[:,-1,:]], axis=1, name="wEnd")
         wordCC    = tf.concat([tf.expand_dims(wordStart, 1), wordMidd, tf.expand_dims(wordEnd, 1)], axis=1, name="wCC")
         print("wordCC", wordCC.shape.as_list())
-        layer3 = tf.contrib.layers.fully_connected(wordCC, 3*attnSize, scope="FC3")
-        layer4 = tf.contrib.layers.fully_connected(layer3, 3*attnSize, scope="FC4")
-        layer5 = tf.contrib.layers.fully_connected(layer4, 3*attnSize, scope="FC5")
+        FClayer2 = tf.contrib.layers.fully_connected(wordCC, 3*attnSize, scope="FC2")
 
-        print("layer5", layer5.shape.as_list())
-        convInp = layer5 #tf.expand_dims(layer5, 3)
-        print("convInp", convInp.shape.as_list())
-        conv1 = tf.layers.conv1d(convInp, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
-        print("conv1", conv1.shape.as_list())
+        conv1 = tf.layers.conv1d(FClayer2, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
+        conv2 = tf.layers.conv1d(FClayer2, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
+        print("conv2", conv1.shape.as_list())
 
-        lstmInp = tf.concat([conv1, attentions, context_hiddens], axis=2)
+        lstmInp = tf.concat([conv2, attentions, context_hiddens], axis=2)
 
         with vs.variable_scope("outputLSTM"):
-           lstmCell   = rnn_cell.LSTMCell(self.FLAGS.hidden_size*2)
-           lstmDO = DropoutWrapper(lstmCell, input_keep_prob=self.keep_prob)
+           lstmCell = rnn_cell.LSTMCell(self.FLAGS.hidden_size*2)
+           lstmDO   = DropoutWrapper(lstmCell, input_keep_prob=self.keep_prob)
            lstmOutputs,states = tf.nn.dynamic_rnn(lstmDO, lstmInp, dtype=tf.float32)
 
         lstmOut_layer1 = tf.contrib.layers.fully_connected(lstmOutputs, num_outputs=self.FLAGS.hidden_size*2) 
         lstmOut_layer2 = tf.contrib.layers.fully_connected(lstmOut_layer1, num_outputs=self.FLAGS.hidden_size)
         lstmOut_final  = tf.layers.dense(lstmOut_layer2, self.FLAGS.hidden_size) 
+        """
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
         with vs.variable_scope("StartDist"):
             softmax_layer_start = SimpleSoftmaxLayer()
-            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(lstmOut_final, self.context_mask)
-            #self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
+            #self.logits_start, self.probdist_start = softmax_layer_start.build_graph(lstmOut_final, self.context_mask)
+            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
 
         # Use softmax layer to compute probability distribution for end location
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
             softmax_layer_end = SimpleSoftmaxLayer()
-            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(lstmOut_final, self.context_mask)
-            #self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
+            #self.logits_end, self.probdist_end = softmax_layer_end.build_graph(lstmOut_final, self.context_mask)
+            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
 
     def add_loss(self):
@@ -298,13 +293,11 @@ class QAModel(object):
         # Match up our input data with the placeholders
         input_feed = {}
         input_feed[self.context_ids] = batch.context_ids
-        print(batch.qn_ids.shape)
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
-        input_feed[self.isTraining_placeholder] = True
 
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
@@ -336,7 +329,6 @@ class QAModel(object):
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
-        input_feed[self.isTraining_placeholder] = False
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
         output_feed = [self.loss]
@@ -362,7 +354,6 @@ class QAModel(object):
         input_feed[self.context_mask] = batch.context_mask
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
-        input_feed[self.isTraining_placeholder] = False
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
         output_feed = [self.probdist_start, self.probdist_end]

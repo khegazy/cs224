@@ -190,6 +190,7 @@ class QAModel(object):
         # Concat attn_output to context_hiddens to get blended_reps
         blended_reps = tf.concat([context_hiddens, gatedAttns], axis=2) # (batch_size, context_len, hidden_size*12)
 
+        """
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
@@ -198,32 +199,39 @@ class QAModel(object):
         blended_reps_layer2 = tf.contrib.layers.fully_connected(blended_reps_layer1_DO, num_outputs=self.FLAGS.hidden_size)
         blended_reps_layer2_DO = tf.nn.dropout(blended_reps_layer2, self.keep_prob) 
         blended_reps_final = tf.layers.dense(blended_reps_layer2_DO, self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+        """
 
 
-        attnSize = gatedAttns.shape.as_list()[2]
-        FClayer1 = tf.contrib.layers.fully_connected(gatedAttns, attnSize, scope="FC1") 
+        attnSize    = gatedAttns.shape.as_list()[2]
+        FClayer1    = tf.contrib.layers.fully_connected(gatedAttns, attnSize, scope="FC1") 
+        FClayer1_DO = tf.nn.dropout(FClayer1, self.keep_prob) 
 
-        wordStart = tf.concat([FClayer1[:,0,:],   FClayer1[:,0,:],    FClayer1[:,1,:]],  axis=1, name="wStart")
-        wordMidd  = tf.concat([FClayer1[:,:-2,:], FClayer1[:,1:-1,:], FClayer1[:,2:,:]], axis=2, name="wMidd")
-        wordEnd   = tf.concat([FClayer1[:,-2,:],  FClayer1[:,-1,:],   FClayer1[:,-1,:]], axis=1, name="wEnd")
+        wordStart = tf.concat([FClayer1_DO[:,0,:],   FClayer1_DO[:,0,:],    FClayer1_DO[:,1,:]],  axis=1, name="wStart")
+        wordMidd  = tf.concat([FClayer1_DO[:,:-2,:], FClayer1_DO[:,1:-1,:], FClayer1_DO[:,2:,:]], axis=2, name="wMidd")
+        wordEnd   = tf.concat([FClayer1_DO[:,-2,:],  FClayer1_DO[:,-1,:],   FClayer1_DO[:,-1,:]], axis=1, name="wEnd")
         wordCC    = tf.concat([tf.expand_dims(wordStart, 1), wordMidd, tf.expand_dims(wordEnd, 1)], axis=1, name="wCC")
         print("wordCC", wordCC.shape.as_list())
-        FClayer2 = tf.contrib.layers.fully_connected(wordCC, 3*attnSize, scope="FC2")
+        FClayer2    = tf.contrib.layers.fully_connected(wordCC, 3*attnSize, scope="FC2")
+        FClayer2_DO = tf.nn.dropout(FClayer2, self.keep_prob)
 
-        conv1 = tf.layers.conv1d(FClayer2, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
-        conv2 = tf.layers.conv1d(FClayer2, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
+        conv1     = tf.layers.conv1d(FClayer2_DO, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
+        conv1_DO  = tf.nn.dropout(conv1, self.keep_prob)
+        conv2     = tf.layers.conv1d(conv1_DO, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
+        conv2_DO  = tf.layers.conv1d(conv2, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
         print("conv2", conv1.shape.as_list())
 
-        lstmInp = tf.concat([conv1, conv2, attentions, context_hiddens], axis=2)
+        lstmInp = tf.concat([conv1_DO, conv2_DO, attentions, context_hiddens], axis=2)
 
         with vs.variable_scope("outputLSTM"):
            lstmCell = rnn_cell.LSTMCell(self.FLAGS.hidden_size*2)
            lstmDO   = DropoutWrapper(lstmCell, input_keep_prob=self.keep_prob)
            lstmOutputs,states = tf.nn.dynamic_rnn(lstmDO, lstmInp, dtype=tf.float32)
 
-        lstmOut_layer1 = tf.contrib.layers.fully_connected(lstmOutputs, num_outputs=self.FLAGS.hidden_size*2) 
-        lstmOut_layer2 = tf.contrib.layers.fully_connected(lstmOut_layer1, num_outputs=self.FLAGS.hidden_size)
-        lstmOut_final  = tf.layers.dense(lstmOut_layer2, self.FLAGS.hidden_size) 
+        lstmOut_layer1    = tf.contrib.layers.fully_connected(lstmOutputs, num_outputs=self.FLAGS.hidden_size*2) 
+        lstmOut_layer1_DO = tf.nn.dropout(lstmOut_layer1, self.keep_prob) 
+        lstmOut_layer2    = tf.contrib.layers.fully_connected(lstmOut_layer1_DO, num_outputs=self.FLAGS.hidden_size)
+        lstmOut_layer2_DO = tf.nn.dropout(lstmOut_layer2, self.keep_prob)
+        lstmOut_final     = tf.layers.dense(lstmOut_layer2_DO, self.FLAGS.hidden_size) 
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)

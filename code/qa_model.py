@@ -200,7 +200,6 @@ class QAModel(object):
         blended_reps_final = tf.layers.dense(blended_reps_layer2_DO, self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
 
 
-        """
         attnSize = gatedAttns.shape.as_list()[2]
         FClayer1 = tf.contrib.layers.fully_connected(gatedAttns, attnSize, scope="FC1") 
 
@@ -225,21 +224,20 @@ class QAModel(object):
         lstmOut_layer1 = tf.contrib.layers.fully_connected(lstmOutputs, num_outputs=self.FLAGS.hidden_size*2) 
         lstmOut_layer2 = tf.contrib.layers.fully_connected(lstmOut_layer1, num_outputs=self.FLAGS.hidden_size)
         lstmOut_final  = tf.layers.dense(lstmOut_layer2, self.FLAGS.hidden_size) 
-        """
 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
         with vs.variable_scope("StartDist"):
             softmax_layer_start = SimpleSoftmaxLayer()
-            #self.logits_start, self.probdist_start = softmax_layer_start.build_graph(lstmOut_final, self.context_mask)
-            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
+            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(lstmOut_final, self.context_mask)
+            #self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
 
         # Use softmax layer to compute probability distribution for end location
         # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
         with vs.variable_scope("EndDist"):
             softmax_layer_end = SimpleSoftmaxLayer()
-            #self.logits_end, self.probdist_end = softmax_layer_end.build_graph(lstmOut_final, self.context_mask)
-            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
+            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(lstmOut_final, self.context_mask)
+            #self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
 
     def add_loss(self):
@@ -528,10 +526,15 @@ class QAModel(object):
         # Checkpoint management.
         # We keep one latest checkpoint, and one best checkpoint (early stopping)
         checkpoint_path = os.path.join(self.FLAGS.train_dir, "qa.ckpt")
-        bestmodel_dir = os.path.join(self.FLAGS.train_dir, "best_checkpoint")
-        bestmodel_ckpt_path = os.path.join(bestmodel_dir, "qa_best.ckpt")
-        best_dev_f1 = None
-        best_dev_em = None
+        bestmodel_em_dir = os.path.join(self.FLAGS.train_dir, "best_em_checkpoint")
+        bestmodel_f1_dir = os.path.join(self.FLAGS.train_dir, "best_f1_checkpoint")
+        bestmodel_loss_dir = os.path.join(self.FLAGS.train_dir, "best_loss_checkpoint")
+        bestmodel_em_ckpt_path = os.path.join(bestmodel_em_dir, "qa_best.ckpt")
+        bestmodel_f1_ckpt_path = os.path.join(bestmodel_f1_dir, "qa_best.ckpt")
+        bestmodel_loss_ckpt_path = os.path.join(bestmodel_loss_dir, "qa_best.ckpt")
+        best_dev_f1   = None
+        best_dev_em   = None
+        best_dev_loss = None
 
         # for TensorBoard
         summary_writer = tf.summary.FileWriter(self.FLAGS.train_dir, session.graph)
@@ -595,8 +598,16 @@ class QAModel(object):
                     # Early stopping based on dev EM. You could switch this to use F1 instead.
                     if best_dev_em is None or dev_em > best_dev_em:
                         best_dev_em = dev_em
-                        logging.info("Saving to %s..." % bestmodel_ckpt_path)
-                        self.bestmodel_saver.save(session, bestmodel_ckpt_path, global_step=global_step)
+                        logging.info("Saving to %s..." % bestmodel_em_ckpt_path)
+                        self.bestmodel_saver.save(session, bestmodel_em_ckpt_path, global_step=global_step)
+                    if best_dev_f1 is None or dev_f1 > best_dev_f1:
+                        best_dev_f1 = dev_f1
+                        logging.info("Saving to %s..." % bestmodel_f1_ckpt_path)
+                        self.bestmodel_saver.save(session, bestmodel_f1_ckpt_path, global_step=global_step)
+                    if best_dev_loss is None or dev_loss < best_dev_loss:
+                        best_dev_loss = dev_loss
+                        logging.info("Saving to %s..." % bestmodel_loss_ckpt_path)
+                        self.bestmodel_saver.save(session, bestmodel_loss_ckpt_path, global_step=global_step)
 
 
             epoch_toc = time.time()

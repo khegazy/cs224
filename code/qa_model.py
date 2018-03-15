@@ -154,28 +154,21 @@ class QAModel(object):
 
         ###  Bidirectional attention flow  ###
         biDirAttn_layer = bidirectionalAttn(self.keep_prob, self.FLAGS.context_len, 
-            self.FLAGS.hidden_size*2, self.FLAGS.question_len, self.FLAGS.hidden_size*2)
+            			self.FLAGS.hidden_size*2, self.FLAGS.question_len, self.FLAGS.hidden_size*2)
         # attn_output is shape (batch_size, context_len, 2*hidden_size)
         biDirAttn_output = biDirAttn_layer.build_graph(question_hiddens, 
-            self.qn_mask, context_hiddens, self.context_mask)
-        biDir_layer1 = tf.contrib.layers.fully_connected(
-                            biDirAttn_output, num_outputs=self.FLAGS.hidden_size*2)
-        biDir_layer2 = tf.contrib.layers.fully_connected(
-                            biDir_layer1, num_outputs=self.FLAGS.hidden_size)
-        biDir_output = tf.contrib.layers.fully_connected(
-                            biDir_layer2, num_outputs=self.FLAGS.hidden_size, activation_fn=None)
-
+           		 	self.qn_mask, context_hiddens, self.context_mask)
+	biDir_output = tf.contrib.layers.fully_connected(
+                             	biDirAttn_output, num_outputs=self.FLAGS.hidden_size)
 
         ###  Coattention  ###
         coAttn_layer = coattention(self.keep_prob, self.FLAGS.context_len, 
-            self.FLAGS.hidden_size*2, self.FLAGS.question_len, self.FLAGS.hidden_size*2)
+            			self.FLAGS.hidden_size*2, self.FLAGS.question_len, self.FLAGS.hidden_size*2)
         # attn_output is shape (batch_size, context_len, 2*hidden_size)
         coAttn_output = coAttn_layer.build_graph(question_hiddens, self.qn_mask, 
-            context_hiddens, self.context_mask)
-        coAttn_layer1 = tf.contrib.layers.fully_connected(
-                            coAttn_output, num_outputs=self.FLAGS.hidden_size)
-        coAttn_output = tf.contrib.layers.fully_connected(
-                            coAttn_layer1, num_outputs=self.FLAGS.hidden_size, activation_fn=None)
+            			context_hiddens, self.context_mask)
+	coAttn_output = tf.contrib.layers.fully_connected(
+                         	coAttn_output, num_outputs=self.FLAGS.hidden_size)
 
         ###  Combine attention models  ###
         # Weight attentions

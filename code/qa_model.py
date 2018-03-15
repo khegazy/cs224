@@ -175,7 +175,7 @@ class QAModel(object):
         attentions = tf.concat([biDir_output, coAttn_output], axis=2)
         attn_weight_calc = get_attn_weights(2, self.FLAGS.question_len, self.FLAGS.context_len, 
             self.FLAGS.hidden_size, self.keep_prob)
-        attn_weights = attn_weight_calc.build_graph(question_hiddens, attentions)
+        attn_weights = attn_weight_calc.build_graph(question_hiddens, self.qn_mask, attentions)
 
         gatedAttns = tf.multiply(attentions, attn_weights) 
         print("Gattn", gatedAttns.shape.as_list())

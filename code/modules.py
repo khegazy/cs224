@@ -337,15 +337,15 @@ class get_attn_weights(object):
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
 
-    def build_graph(self, question_hiddens, attentions):
+    def build_graph(self, question_hiddens, question_mask, attentions):
         with vs.variable_scope("attenWeights"):
-            batch_size = tf.shape(attentions)[0]
-            qSize = self.question_len*self.hidden_size*2
-            qHiddens  = tf.reshape(question_hiddens, shape=tf.stack([batch_size, qSize]))
-            qLayer1   = tf.contrib.layers.fully_connected(qHiddens, qSize//5)
-            qLayer1DO = tf.nn.dropout(qLayer1, self.keep_prob)
-            qSummary  = tf.layers.dense(qLayer1DO, units=self.hidden_size)
-            qSummaryDO= tf.nn.dropout(qSummary, self.keep_prob)
+            batch_size  = tf.shape(attentions)[0]
+            qHiddens    = tf.einsum('sij,si->sj', question_hiddens, 
+                              tf.cast(question_mask, tf.float32))
+            qLayer1     = tf.contrib.layers.fully_connected(qHiddens, self.hidden_size)
+            qLayer1DO   = tf.nn.dropout(qLayer1, self.keep_prob)
+            qSummary    = tf.layers.dense(qLayer1DO, units=self.hidden_size)
+            qSummaryDO  = tf.nn.dropout(qSummary, self.keep_prob)
 
             aSize     = attentions.shape.as_list()[2] 
             inpMask   = tf.concat([attentions, 

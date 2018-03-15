@@ -116,7 +116,9 @@ def main(unused_argv):
     FLAGS.train_dir = FLAGS.train_dir or os.path.join(EXPERIMENTS_DIR, FLAGS.experiment_name)
 
     # Initialize bestmodel directory
-    bestmodel_dir = os.path.join(FLAGS.train_dir, "best_checkpoint")
+    bestmodel_em_dir = os.path.join(FLAGS.train_dir, "best_em_checkpoint")
+    bestmodel_f1_dir = os.path.join(FLAGS.train_dir, "best_f1_checkpoint")
+    bestmodel_loss_dir = os.path.join(FLAGS.train_dir, "best_loss_checkpoint")
 
     # Define path for glove vecs
     FLAGS.glove_path = FLAGS.glove_path or os.path.join(DEFAULT_DATA_DIR, "glove.6B.{}d.txt".format(FLAGS.embedding_size))
@@ -153,8 +155,10 @@ def main(unused_argv):
             json.dump(FLAGS.__flags, fout)
 
         # Make bestmodel dir if necessary
-        if not os.path.exists(bestmodel_dir):
-            os.makedirs(bestmodel_dir)
+        if not os.path.exists(bestmodel_f1_dir):
+            os.makedirs(bestmodel_em_dir)
+            os.makedirs(bestmodel_f1_dir)
+            os.makedirs(bestmodel_loss_dir)
 
         with tf.Session(config=config) as sess:
 
@@ -169,7 +173,7 @@ def main(unused_argv):
         with tf.Session(config=config) as sess:
 
             # Load best model
-            initialize_model(sess, qa_model, bestmodel_dir, expect_exists=True)
+            initialize_model(sess, qa_model, bestmodel_f1_dir, expect_exists=True)
 
             # Show examples with F1/EM scores
             _, _ = qa_model.check_f1_em(sess, dev_context_path, dev_qn_path, dev_ans_path, "dev", num_samples=10, print_to_screen=True)

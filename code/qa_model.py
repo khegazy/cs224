@@ -214,13 +214,13 @@ class QAModel(object):
         FClayer2    = tf.contrib.layers.fully_connected(wordCC, 3*attnSize, scope="FC2")
         FClayer2_DO = tf.nn.dropout(FClayer2, self.keep_prob)
 
-        conv1     = tf.layers.conv1d(FClayer2_DO, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
+        conv1     = tf.layers.conv1d(FClayer2_DO, self.FLAGS.hidden_size, kernel_size=5, padding='same')
         conv1_DO  = tf.nn.dropout(conv1, self.keep_prob)
-        conv2     = tf.layers.conv1d(conv1_DO, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
-        conv2_DO  = tf.layers.conv1d(conv2, self.FLAGS.hidden_size*2, kernel_size=5, padding='same')
+        conv2     = tf.layers.conv1d(conv1_DO, self.FLAGS.hidden_size, kernel_size=5, padding='same')
+        conv2_DO  = tf.nn.dropout(conv2, self.keep_prob) 
         print("conv2", conv1.shape.as_list())
 
-        lstmInp = tf.concat([conv1_DO, conv2_DO, attentions, context_hiddens], axis=2)
+        lstmInp = tf.concat([conv1_DO, conv2_DO, attentions], axis=2)
 
         with vs.variable_scope("outputLSTM"):
            lstmCell = rnn_cell.LSTMCell(self.FLAGS.hidden_size*2)

@@ -340,7 +340,11 @@ class get_attn_weights(object):
     def build_graph(self, question_hiddens, question_mask, attentions):
         with vs.variable_scope("attenWeights"):
             batch_size  = tf.shape(attentions)[0]
-            qHiddens    = tf.einsum('sij,si->sj', question_hiddens, 
+            qIndicators = tf.get_variable(name="questionIndicators", dtype=tf.float32,
+                              shape=(self.hidden_size*2, 200))
+            coeff       = tf.einsum('sij,jk->sik', question_hiddens, qIndicators)
+            qProj       = tf.einsum('ij,skj->ski', qIndicators, coeff)              
+            qHiddens    = tf.einsum('sij,si->sj', qProj, 
                               tf.cast(question_mask, tf.float32))
             qLayer1     = tf.contrib.layers.fully_connected(qHiddens, self.hidden_size)
             qLayer1DO   = tf.nn.dropout(qLayer1, self.keep_prob)

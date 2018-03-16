@@ -215,14 +215,16 @@ class QAModel(object):
 
         lstmInp = tf.concat([conv1_DO, conv2_DO, attentions], axis=2)
 
+        """
         with vs.variable_scope("outputLSTM"):
            lstmCell = rnn_cell.LSTMCell(self.FLAGS.hidden_size*2)
            lstmDO   = DropoutWrapper(lstmCell, input_keep_prob=self.keep_prob)
            lstmOutputs,states = tf.nn.dynamic_rnn(lstmDO, lstmInp, dtype=tf.float32)
+        """
 
-        lstmOut_layer1    = tf.contrib.layers.fully_connected(lstmOutputs, num_outputs=self.FLAGS.hidden_size*2) 
+        lstmOut_layer1    = tf.contrib.layers.fully_connected(lstmInp, num_outputs=self.FLAGS.hidden_size*4) 
         lstmOut_layer1_DO = tf.nn.dropout(lstmOut_layer1, self.keep_prob) 
-        lstmOut_layer2    = tf.contrib.layers.fully_connected(lstmOut_layer1_DO, num_outputs=self.FLAGS.hidden_size)
+        lstmOut_layer2    = tf.contrib.layers.fully_connected(lstmOut_layer1_DO, num_outputs=self.FLAGS.hidden_size*2)
         lstmOut_layer2_DO = tf.nn.dropout(lstmOut_layer2, self.keep_prob)
         lstmOut_final     = tf.layers.dense(lstmOut_layer2_DO, self.FLAGS.hidden_size) 
 
